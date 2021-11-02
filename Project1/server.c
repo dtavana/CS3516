@@ -40,15 +40,43 @@ void *get_in_addr(struct sockaddr *sa)
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-void receive(int socket, int size, void* saveStruct) {
-    int bytesRecv, totalBytesRecv = 0;
-    while(totalBytesRecv < size) {
-        if ((bytesRecv = recv(socket, saveStruct, size, 0)) == -1) {
-				perror("receive");
-				exit(1);
-        }
-        totalBytesRecv += bytesRecv;
+// Modified from https://www.codeproject.com/Answers/640199/Random-string-in-language-C#answer1
+void genrandom(char *s, int len) {
+    char* alphanum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    for (int i = 0; i < len; ++i) {
+        s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
     }
+
+    s[len] = 0;
+}
+
+void receive(int socket, uint32_t size, void* saveStruct) {
+    uint32_t bytesRecv, totalBytesRecv = 0;
+	int cnt = 0;
+    while(totalBytesRecv < size) {
+		bytesRecv = recv(socket, saveStruct, size, 0);
+        if (bytesRecv == -1) {
+			perror("receive");
+			exit(1);
+        }
+		cnt++;
+		totalBytesRecv += bytesRecv;
+		printf("Received %d/%d bytes on the iteration #%d | Total received: %d\n", bytesRecv, size, cnt, totalBytesRecv);
+    }
+}
+
+void save_to_temp_file(char* data, int size) {
+	FILE* fp;
+	char* filename;
+	char randomstring[6];
+	genrandom(randomstring, 6);
+	sprintf(filename, "%s.png", randomstring);
+
+	fp = fopen(filename, "wb");
+	int bytesWritten = fwrite(data, 1, size, fp);
+	fclose(fp);
+	printf("Succesfully wrote %d bytes to %s\n", bytesWritten, filename);
 }
 
 int main(int argc, char *argv[])
@@ -138,13 +166,13 @@ int main(int argc, char *argv[])
 		printf("server: got connection from %s\n", s);
 
 		// Receive file size
-		int filesize;
-		receive(new_fd, sizeof(int), &filesize);
+		uint32_t filesize;
+		receive(new_fd, sizeof(uint32_t), &filesize);
 		printf("server: received filesize of '%d'\n", filesize);
 		char data[filesize];
 		receive(new_fd, filesize, data);
-		data[filesize] = '\0';
-		printf("server: received contents of '%s'\n", data);
+		printf("server: received filedata of '%s'\n", data);
+		save_to_temp_file(data, filesize);
 		close(new_fd);
 
 		/*
