@@ -27,26 +27,29 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 void send_file(char* filename, int sockfd) {
-	FILE *fp;
-	char data[4096];
+	FILE* fp;
 
-	fp = fopen(filename, "r");
+	fp = fopen(filename, "rb");
 	if(fp == NULL) {
 		perror("Could not open the specified file");
 		exit(1);
 	}
 
 	// Read file
-	int size = fread(data, sizeof(char), 4096, fp);
+	char data[4096];
+	uint32_t filesize = fread(data, 1, 4096, fp);
+	
+	printf("Read file of size: %d\n", filesize);
+	printf("Read file with data: %s\n", data);
 
 	// Send file size
-	if(send(sockfd, (void*) &size, sizeof(int), 0) == -1) {
+	if(send(sockfd, &filesize, sizeof(uint32_t), 0) == -1) {
 		perror("send size");
 	}
-	printf("Done sending file contents\n");
+	printf("Done sending file size\n");
 
 	// Send file contents
-	if(send(sockfd, data, size, 0) == -1) {
+	if(send(sockfd, data, sizeof(data), 0) == -1) {
 		perror("send contents");
 	}
 	printf("Done sending file contents\n");
