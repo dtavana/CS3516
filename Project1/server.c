@@ -72,7 +72,7 @@ void save_to_temp_file(char* data, int size) {
 	char* filename;
 	char randomstring[6];
 	genrandom(randomstring, 6);
-	sprintf(filename, "%s.png", randomstring);
+	sprintf(filename, "out/%s.png", randomstring);
 
 	fp = fopen(filename, "wb");
 	int bytesWritten = fwrite(data, 1, size, fp);
