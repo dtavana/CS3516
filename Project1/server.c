@@ -62,6 +62,7 @@ void receive(int socket, uint32_t size, void* saveStruct) {
         }
 		cnt++;
 		totalBytesRecv += bytesRecv;
+		saveStruct += bytesRecv;
 		printf("Received %d/%d bytes on the iteration #%d | Total received: %d\n", bytesRecv, size, cnt, totalBytesRecv);
     }
 }
@@ -169,7 +170,7 @@ int main(int argc, char *argv[])
 		uint32_t filesize;
 		receive(new_fd, sizeof(uint32_t), &filesize);
 		printf("server: received filesize of '%d'\n", filesize);
-		char data[filesize];
+		char* data = (char *) malloc(4096);
 		receive(new_fd, filesize, data);
 		printf("server: received filedata of '%s'\n", data);
 		save_to_temp_file(data, filesize);
