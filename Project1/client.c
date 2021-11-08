@@ -56,6 +56,22 @@ void send_file(char* filename, int sockfd) {
 	fclose(fp);
 }
 
+void receive(int socket, uint32_t size, void* saveStruct) {
+    uint32_t bytesRecv, totalBytesRecv = 0;
+	int cnt = 0;
+    while(totalBytesRecv < size) {
+		bytesRecv = recv(socket, saveStruct, size, 0);
+        if (bytesRecv == -1) {
+			perror("receive");
+			exit(1);
+        }
+		cnt++;
+		totalBytesRecv += bytesRecv;
+		saveStruct += bytesRecv;
+		printf("Received %d/%d bytes on the iteration #%d | Total received: %d\n", bytesRecv, size, cnt, totalBytesRecv);
+    }
+}
+
 int main(int argc, char *argv[])
 {
 	int sockfd, numbytes;  
@@ -111,6 +127,25 @@ int main(int argc, char *argv[])
 	freeaddrinfo(servinfo); // all done with this structure
 
 	send_file(filename, sockfd);
+	uint32_t servercode;
+	receive(sockfd, sizeof(uint32_t), &servercode);
+	printf("client received servercode: %d\n", servercode);
+	if(servercode != 1) {
+		// Read rest of data
+		uint32_t datalength;
+		receive(sockfd, sizeof(uint32_t), &datalength);
+		printf("client received datalength: %d\n", datalength);
+		char* data = (char *) malloc(datalength);
+		receive(sockfd, datalength, data);
+		printf("client received data: %s\n", data);
+		if(servercode == 0) {
+			printf("Sucesfully decoded QRCode to URL: %s\n", data);
+		} else {
+			printf("Received the following error: %s\n", data);
+		}
+	} else {
+		// URL could not be decoded
+	}
 
 	close(sockfd);
 
