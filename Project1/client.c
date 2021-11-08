@@ -139,12 +139,13 @@ int main(int argc, char *argv[])
 		receive(sockfd, datalength, data);
 		printf("client received data: %s\n", data);
 		if(servercode == 0) {
-			printf("Sucesfully decoded QRCode to URL: %s\n", data);
+			printf("Succesfully decoded QRCode to URL: %s\n", data);
 		} else {
 			printf("Received the following error: %s\n", data);
 		}
 	} else {
 		// URL could not be decoded
+		printf("URL could not be decoded for provided file\n");
 	}
 
 	close(sockfd);
