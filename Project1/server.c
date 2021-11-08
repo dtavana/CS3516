@@ -315,7 +315,6 @@ int main(int argc, char *argv[])
 			printf("Created new process with pid: %d\n", pid);
 			clients[current_clients] = pid;
 			current_clients++;
-			printPIDArr(clients, NUM_USERS);
 		}
 	}
 	close(sockfd);
