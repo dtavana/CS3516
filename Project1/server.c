@@ -97,7 +97,7 @@ void logentry(char* message, char* addr) {
 void parseargs(int argc, char *argv[]) {
 	int c;
 	char msg[256];
-	while((c = getopt(argc, argv, "p:r:s:m:t:")) != -1) {
+	while((c = getopt(argc, argv, "p:r:s:m:t:h")) != -1) {
 		switch (c) {
 			case 'p':
 				port = optarg;
@@ -121,6 +121,15 @@ void parseargs(int argc, char *argv[]) {
 				break;
 			case 't':
 				clienttimeout = atoi(optarg);
+				break;
+			case 'h':
+				printf("Usage: ./server -p PORT -r NUM_REQUESTS -s NUM_SECONDS -m MAX_USERS -t TIMEOUT\n");
+				printf("PORT: Port to run server on\n");
+				printf("NUM_REQUESTS: Number of requests used in rate limit\n");
+				printf("NUM_SECONDS: Number of seconds used in rate limit\n");
+				printf("MAX_USERS: Max number of concurrent users\n");
+				printf("TIMEOUT: Number of seconds for client timeout\n");
+				exit(1);
 				break;
 
 		}
