@@ -21,7 +21,7 @@
 
 // DEFAULTS
 // Default port
-#define PORT 2012
+#define PORT "2012"
 // Default number of requests for rate limiting
 #define NUM_REQUESTS 3
 // Default number of requests per seconds (NUM_REQUESTS / NUM_SECONDS = rate limit)
@@ -45,6 +45,12 @@
 
 pthread_mutex_t log_mutex;
 
+// Hold actual runtime settings in these vars
+char* port = PORT;
+int numrequests = NUM_REQUESTS;
+int numseconds = NUM_SECONDS;
+int maxusers = NUM_USERS;
+int clienttimeout = TIMEOUT;
 
 void sigchld_handler(int s)
 {
@@ -69,6 +75,7 @@ void *get_in_addr(struct sockaddr *sa)
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+
 void logentry(char* message, char* addr) {
 	// Time formatting adapted from: https://stackoverflow.com/a/36064756
 	struct tm* to;
@@ -85,6 +92,41 @@ void logentry(char* message, char* addr) {
 	fputs(finalmsg, fp);
 	fclose(fp);
 	pthread_mutex_unlock(&log_mutex);
+}
+
+void parseargs(int argc, char *argv[]) {
+	int c;
+	char msg[256];
+	while((c = getopt(argc, argv, "p:r:s:m:t:")) != -1) {
+		switch (c) {
+			case 'p':
+				port = optarg;
+				int portint = atoi(port);
+				if(portint < 2000 || portint > 3000) {
+					sprintf(msg, "Invalid port specified: %d (Valid values 2000-3000)", portint);
+					printf("%s\n", msg);
+					logentry(msg, "SERVER");
+					exit(1);
+				}
+				printf("Parsed port: %s\n", port);
+				break;
+			case 'r':
+				numrequests = atoi(optarg);
+				break;
+			case 's':
+				numseconds = atoi(optarg);
+				break;
+			case 'm':
+				maxusers = atoi(optarg);
+				break;
+			case 't':
+				clienttimeout = atoi(optarg);
+				break;
+
+		}
+	}
+	sprintf(msg, "Using the following arguments: PORT %s | NUM_REQUESTS %d | NUM_SECONDS %d | MAX_USERS %d | TIMEOUT %d", port, numrequests, numseconds, maxusers, clienttimeout);
+	logentry(msg, "SERVER");
 }
 
 // Modified from https://www.codeproject.com/Answers/640199/Random-string-in-language-C#answer1
@@ -237,6 +279,7 @@ int checkClients(pid_t* clients, int size, int current_clients, char* s) {
 
 int main(int argc, char *argv[])
 {
+	parseargs(argc, argv);
 	int sockfd, new_fd;  // listen on sock_fd, new connection on new_fd
 	struct addrinfo hints, *servinfo, *p;
 	struct sockaddr_storage their_addr; // connector's address information
@@ -245,21 +288,15 @@ int main(int argc, char *argv[])
 	int yes=1;
 	char s[INET6_ADDRSTRLEN];
 	int rv;
-	pid_t clients[NUM_USERS];
+	pid_t clients[maxusers];
 	int current_clients = 0;
 
-	for(int i = 0; i < NUM_USERS; i++) {
+	
+	for(int i = 0; i < maxusers; i++) {
 		clients[i] = 0;
 	}
 
 	pthread_mutex_init(&log_mutex, NULL);
-
-	if (argc != 2) {
-	    fprintf(stderr,"usage: server port\n");
-	    exit(1);
-	}
-	
-	char* port = argv[1];
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
@@ -327,8 +364,8 @@ int main(int argc, char *argv[])
 		inet_ntop(their_addr.ss_family,
 			get_in_addr((struct sockaddr *)&their_addr),
 			s, sizeof s);
-		current_clients = checkClients(clients, NUM_USERS, current_clients, s);
-		if(current_clients >= NUM_USERS) {
+		current_clients = checkClients(clients, maxusers, current_clients, s);
+		if(current_clients >= maxusers) {
 			logentry("Too many users currently connected", s);
 			// Too many users
 			// Use servercode 5 for too many users
