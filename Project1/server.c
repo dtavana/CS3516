@@ -315,6 +315,7 @@ int main(int argc, char *argv[])
 	}
 
 	printf("server: waiting for connections...\n");
+	logentry("Server started, waiting for connections", "SERVER");
 
 	while(1) {  // main accept() loop
 		sin_size = sizeof their_addr;
@@ -358,6 +359,7 @@ int main(int argc, char *argv[])
 				close(sockfd);
 				runInteraction(new_fd, s);
 				close(new_fd);
+				logentry("Client disconnected", s);
 				exit(1);
 			} else {
 				// In parent process
