@@ -14,6 +14,8 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <time.h>
+#include <pthread.h>
 
 #define BACKLOG 10	 // how many pending connections queue will hold
 
@@ -38,6 +40,10 @@
 #define MAX_URL_LENGTH 100
 // Out directory for created files
 #define OUT_DIR "~/projects/Project1/out"
+// Error message for too many clients
+#define TOO_MANY_USERS "Too many users are currently connected"
+
+pthread_mutex_t log_mutex;
 
 
 void sigchld_handler(int s)
@@ -61,6 +67,24 @@ void *get_in_addr(struct sockaddr *sa)
 	}
 
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
+void logentry(char* message, char* addr) {
+	// Time formatting adapted from: https://stackoverflow.com/a/36064756
+	struct tm* to;
+	time_t t = time(NULL);
+	to = localtime(&t);
+	char timestr[256];
+	strftime(timestr, sizeof(timestr), "%F %T", to);
+	char finalmsg[sizeof(timestr) + sizeof(addr) | sizeof(message)];
+	sprintf(finalmsg, "%s %s | %s\n", timestr, addr, message);
+	
+	pthread_mutex_lock(&log_mutex);
+	FILE* fp;
+	fp = fopen("out/socketserver.log", "a");
+	fputs(finalmsg, fp);
+	fclose(fp);
+	pthread_mutex_unlock(&log_mutex);
 }
 
 // Modified from https://www.codeproject.com/Answers/640199/Random-string-in-language-C#answer1
@@ -105,7 +129,6 @@ void save_to_temp_file(char* data, int size, char* filename) {
 int decodeImage(char* filename, char* res) {
 	char command[400] = {0};
 	sprintf(command, "java -cp javase.jar:core.jar com.google.zxing.client.j2se.CommandLineRunner %s", filename);
-	printf("Command: %s\n", command);
 
 	FILE* cmdout = popen(command, "r");
 	if(!cmdout) {
@@ -128,14 +151,13 @@ int decodeImage(char* filename, char* res) {
 	return 0;
 }
 
-void runInteraction(int sockfd) {
-	// Receive file size
+void runInteraction(int sockfd, char* s) {
+		// Receive file size
 		uint32_t filesize;
 		receive(sockfd, sizeof(uint32_t), &filesize);
-		printf("server: received filesize of '%d'\n", filesize);
+		char msg[256];
 		char* data = (char *) malloc(4096);
 		receive(sockfd, filesize, data);
-		printf("server: received filedata of '%s'\n", data);
 		// NUM_IDENTIFIER + 4 for 'out/' + 4 for '.png'
 		char* filename = (char *) malloc(NUM_IDENTIFIER + 4 + 4);
 		save_to_temp_file(data, filesize, filename);
@@ -145,12 +167,13 @@ void runInteraction(int sockfd) {
 		uint32_t urllength;
 		if(imageprocessres == 1) {
 			// Succesful decode
-			printf("Succesfully decoded to URL: %s\n", url);
+			sprintf(msg, "Succesfully decoded to URL: %s", url);
+			logentry(msg, s);
 			servercode = 0;
 			urllength = MAX_URL_LENGTH;
 		} else {
 			// Unsuccesful decode
-			printf("Could not decode QR Code\n");
+			logentry("Could not decode QR Code", s);
 			servercode = 1;
 			urllength = 0;
 		}
@@ -192,7 +215,7 @@ void removeFromPIDArr(pid_t* arr, pid_t el, int size) {
 
 }
 
-int checkClients(pid_t* clients, int size, int current_clients) {
+int checkClients(pid_t* clients, int size, int current_clients, char* s) {
 	for(int i = 0; i < size; i++) {
 		pid_t pid = clients[i];
 		if(pid == 0) {
@@ -200,9 +223,11 @@ int checkClients(pid_t* clients, int size, int current_clients) {
 		}
 		int status;
 		pid_t res = waitpid(pid, &status, WNOHANG);
-		printf("Checking PID: %d | Result: %d\n", pid, res);
 		if(res != 0) {
-			printf("Purging PID: %d from clients\n", pid);
+			char msg[256];
+			printPIDArr(clients, size);
+			sprintf(msg, "Purging PID: %d from clients", pid);
+			logentry(msg, s);
 			removeFromPIDArr(clients, pid, size);
 			current_clients--;
 		}
@@ -222,6 +247,12 @@ int main(int argc, char *argv[])
 	int rv;
 	pid_t clients[NUM_USERS];
 	int current_clients = 0;
+
+	for(int i = 0; i < NUM_USERS; i++) {
+		clients[i] = 0;
+	}
+
+	pthread_mutex_init(&log_mutex, NULL);
 
 	if (argc != 2) {
 	    fprintf(stderr,"usage: server port\n");
@@ -292,31 +323,54 @@ int main(int argc, char *argv[])
 			perror("accept");
 			continue;
 		}
-		current_clients = checkClients(clients, NUM_USERS, current_clients);
 		inet_ntop(their_addr.ss_family,
 			get_in_addr((struct sockaddr *)&their_addr),
 			s, sizeof s);
-		printf("server: got connection from %s\n", s);
-
-		pid_t pid = fork();
-		if(pid < 0) {
-			printf("fork failed");
-			exit(1);
-		}
-		if(pid == 0) {
-			// In child process
-			close(sockfd);
-			runInteraction(new_fd);
+		current_clients = checkClients(clients, NUM_USERS, current_clients, s);
+		if(current_clients >= NUM_USERS) {
+			logentry("Too many users currently connected", s);
+			// Too many users
+			// Use servercode 5 for too many users
+			uint32_t servercode = 5;
+			if(send(new_fd, &servercode, sizeof(uint32_t), 0) == -1) {
+				perror("send servercode");
+			}
+			char* toomanyusers = TOO_MANY_USERS;
+			uint32_t toomanyuserslen = sizeof(toomanyusers);
+			if(send(new_fd, &toomanyuserslen, sizeof(uint32_t), 0) == -1) {
+				perror("send toomanyuserslen");
+			}
+			
+			if(send(new_fd, toomanyusers, toomanyuserslen, 0) == -1) {
+				perror("send toomanyusers");
+			}
 			close(new_fd);
-			exit(1);
 		} else {
-			// In parent process
-			close(new_fd);
-			printf("Created new process with pid: %d\n", pid);
-			clients[current_clients] = pid;
-			current_clients++;
+			logentry("Recevied connection", s);
+
+			pid_t pid = fork();
+			if(pid < 0) {
+				printf("fork failed");
+				exit(1);
+			}
+			if(pid == 0) {
+				// In child process
+				close(sockfd);
+				runInteraction(new_fd, s);
+				close(new_fd);
+				exit(1);
+			} else {
+				// In parent process
+				close(new_fd);
+				char msg[256];
+				sprintf(msg, "Created new process with PID: %d", pid);
+				logentry(msg, s);
+				clients[current_clients] = pid;
+				current_clients++;
+			}
 		}
 	}
+	pthread_mutex_destroy(&log_mutex);
 	close(sockfd);
 	return 0;
 }
