@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <time.h>
+#include <sys/time.h>
 #include <pthread.h>
 
 #define BACKLOG 10	 // how many pending connections queue will hold
@@ -46,8 +47,15 @@
 #define TOO_MANY_USERS "Too many users are currently connected"
 // Error message for file size too big
 #define FILESIZE_TOO_BIG "Filesize too big, max: %d\n"
+// Error message for rate limit
+#define RATE_LIMIT "Exceeded rate limit, try again in %d seconds\n"
 
 pthread_mutex_t log_mutex;
+
+typedef struct RateLimitEntry {
+	char* addr;
+	struct timeval time;
+} RateLimitEntry;
 
 // Hold actual runtime settings in these vars
 char* port = PORT;
@@ -232,7 +240,6 @@ void runInteraction(int sockfd, char* s) {
 		} else {
 			char* data = (char *) malloc(MAX_IMAGE_SIZE);
 			receive(sockfd, filesize, data);
-			printf("%d\n", filesize);
 			// NUM_IDENTIFIER + 4 for 'out/' + 4 for '.png'
 			char* filename = (char *) malloc(NUM_IDENTIFIER + 4 + 4);
 			save_to_temp_file(data, filesize, filename);
@@ -274,6 +281,12 @@ void printPIDArr(pid_t* arr, int size) {
 	}
 }
 
+void printRLArr(RateLimitEntry* arr, int size) {
+	for(int i = 0; i < size; i++) {
+		printf("Current RLEntry at index %d: %s:%ld\n", i, arr[i].addr, arr[i].time.tv_sec);
+	}
+}
+
 void removeFromPIDArr(pid_t* arr, pid_t el, int size) {
 	int index = -1;
 	for(int i = 0; i < size; i++) {
@@ -301,7 +314,7 @@ int checkClients(pid_t* clients, int size, int current_clients, char* s) {
 		pid_t res = waitpid(pid, &status, WNOHANG);
 		if(res != 0) {
 			char msg[256];
-			printPIDArr(clients, size);
+			//printPIDArr(clients, size);
 			sprintf(msg, "Purging PID: %d from clients", pid);
 			logentry(msg, s);
 			removeFromPIDArr(clients, pid, size);
@@ -310,6 +323,57 @@ int checkClients(pid_t* clients, int size, int current_clients, char* s) {
 	}
 	return current_clients;
 }
+
+void addratelimitentry(char* s, RateLimitEntry* ratelimits, int current_rate_limits) {
+	struct timeval t;
+	gettimeofday(&t, NULL);
+	RateLimitEntry e;
+	e.addr = s;
+	e.time = t;
+	ratelimits[current_rate_limits] = e;
+	logentry("Added rate limit entry", s);
+}
+
+int purgeratelimits(RateLimitEntry* ratelimits, int current_rate_limits, int size) {
+	struct timeval t;
+	gettimeofday(&t, NULL);
+	for(int i = 0; i < size; i++) {
+		RateLimitEntry el = ratelimits[i];
+		if(strcmp(el.addr, "-1") == 0) {
+			continue;
+		}
+		time_t sec = el.time.tv_sec;
+		if(sec + numseconds < t.tv_sec) {
+			// Purge entry
+			logentry("Purging rate limit entry", el.addr);
+			RateLimitEntry newEl;
+			newEl.addr = "-1";
+			ratelimits[i] = newEl;
+			current_rate_limits--;
+		}
+	}
+	return current_rate_limits;
+}
+
+int getcurrentratelimits(char* s, RateLimitEntry* ratelimits, int size) {
+	int cnt = 0;
+	for(int i = 0; i < size; i++) {
+		RateLimitEntry el = ratelimits[i];
+		if(strcmp(el.addr, s) == 0) {
+			cnt++;
+		}
+	}
+	return cnt;
+}
+
+int checkratelimits(char* s, RateLimitEntry* ratelimits, int size) {
+	int cnt = getcurrentratelimits(s, ratelimits, size);
+	char msg[265];
+	sprintf(msg, "Current valid rate limit entries: %d", cnt);
+	logentry(msg, s);
+	return cnt <= numrequests;
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -324,10 +388,18 @@ int main(int argc, char *argv[])
 	int rv;
 	pid_t clients[maxusers];
 	int current_clients = 0;
+	RateLimitEntry ratelimits[numrequests * maxusers];
+	int current_rate_limits = 0;
 
 	
 	for(int i = 0; i < maxusers; i++) {
 		clients[i] = 0;
+	}
+
+	for(int i = 0; i < numrequests * maxusers; i++) {
+		RateLimitEntry el;
+		el.addr = "-1";
+		ratelimits[i] = el;
 	}
 
 	pthread_mutex_init(&log_mutex, NULL);
@@ -399,47 +471,68 @@ int main(int argc, char *argv[])
 			get_in_addr((struct sockaddr *)&their_addr),
 			s, sizeof s);
 		current_clients = checkClients(clients, maxusers, current_clients, s);
-		if(current_clients >= maxusers) {
-			logentry("Too many users currently connected", s);
-			// Too many users
-			// Use servercode 5 for too many users
-			uint32_t servercode = 5;
+		current_rate_limits = purgeratelimits(ratelimits, current_rate_limits, numrequests * maxusers);
+		int validratelimits = getcurrentratelimits(s, ratelimits, numrequests * maxusers);
+		if(validratelimits >= numrequests) {
+			logentry("Hit rate limit", s);
+			// Use servercode 3 for too many users
+			uint32_t servercode = 3;
 			if(send(new_fd, &servercode, sizeof(uint32_t), 0) == -1) {
 				perror("send servercode");
 			}
-			char* toomanyusers = TOO_MANY_USERS;
-			uint32_t toomanyuserslen = sizeof(toomanyusers);
-			if(send(new_fd, &toomanyuserslen, sizeof(uint32_t), 0) == -1) {
-				perror("send toomanyuserslen");
+			char ratelimit[100];
+			sprintf(ratelimit, RATE_LIMIT, numseconds);
+			uint32_t ratelimitlen = sizeof(ratelimit);
+			if(send(new_fd, &ratelimitlen, sizeof(uint32_t), 0) == -1) {
+				perror("send ratelimitlen");
 			}
 			
-			if(send(new_fd, toomanyusers, toomanyuserslen, 0) == -1) {
-				perror("send toomanyusers");
+			if(send(new_fd, ratelimit, ratelimitlen, 0) == -1) {
+				perror("send ratelimit");
 			}
-			close(new_fd);
 		} else {
-			logentry("Recevied connection", s);
-
-			pid_t pid = fork();
-			if(pid < 0) {
-				printf("fork failed");
-				exit(1);
-			}
-			if(pid == 0) {
-				// In child process
-				close(sockfd);
-				runInteraction(new_fd, s);
-				close(new_fd);
-				logentry("Client disconnected", s);
-				exit(1);
+			addratelimitentry(s, ratelimits, current_rate_limits);
+			current_rate_limits++;
+			if(current_clients >= maxusers) {
+				logentry("Too many users currently connected", s);
+				// Too many users
+				// Use servercode 5 for too many users
+				uint32_t servercode = 5;
+				if(send(new_fd, &servercode, sizeof(uint32_t), 0) == -1) {
+					perror("send servercode");
+				}
+				char* toomanyusers = TOO_MANY_USERS;
+				uint32_t toomanyuserslen = sizeof(toomanyusers);
+				if(send(new_fd, &toomanyuserslen, sizeof(uint32_t), 0) == -1) {
+					perror("send toomanyuserslen");
+				}
+				
+				if(send(new_fd, toomanyusers, toomanyuserslen, 0) == -1) {
+					perror("send toomanyusers");
+				}
 			} else {
-				// In parent process
-				close(new_fd);
-				char msg[256];
-				sprintf(msg, "Created new process with PID: %d", pid);
-				logentry(msg, s);
-				clients[current_clients] = pid;
-				current_clients++;
+				logentry("Received connection", s);
+				pid_t pid = fork();
+				if(pid < 0) {
+					printf("fork failed");
+					exit(1);
+				}
+				if(pid == 0) {
+					// In child process
+					close(sockfd);
+					runInteraction(new_fd, s);
+					close(new_fd);
+					logentry("Client disconnected", s);
+					exit(1);
+				} else {
+					// In parent process
+					close(new_fd);
+					char msg[256];
+					sprintf(msg, "Created new process with PID: %d", pid);
+					logentry(msg, s);
+					clients[current_clients] = pid;
+					current_clients++;
+				}
 			}
 		}
 	}
