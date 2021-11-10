@@ -38,10 +38,14 @@
 #define MAX_LINE_LENGTH 100
 // Max URL Length
 #define MAX_URL_LENGTH 100
+// Max image file size
+#define MAX_IMAGE_SIZE 4096
 // Out directory for created files
 #define OUT_DIR "~/projects/Project1/out"
 // Error message for too many clients
 #define TOO_MANY_USERS "Too many users are currently connected"
+// Error message for file size too big
+#define FILESIZE_TOO_BIG "Filesize too big, max: %d\n"
 
 pthread_mutex_t log_mutex;
 
@@ -108,7 +112,6 @@ void parseargs(int argc, char *argv[]) {
 					logentry(msg, "SERVER");
 					exit(1);
 				}
-				printf("Parsed port: %s\n", port);
 				break;
 			case 'r':
 				numrequests = atoi(optarg);
@@ -204,41 +207,63 @@ int decodeImage(char* filename, char* res) {
 
 void runInteraction(int sockfd, char* s) {
 		// Receive file size
+		char msg[256];
 		uint32_t filesize;
 		receive(sockfd, sizeof(uint32_t), &filesize);
-		char msg[256];
-		char* data = (char *) malloc(4096);
-		receive(sockfd, filesize, data);
-		// NUM_IDENTIFIER + 4 for 'out/' + 4 for '.png'
-		char* filename = (char *) malloc(NUM_IDENTIFIER + 4 + 4);
-		save_to_temp_file(data, filesize, filename);
-		char url[MAX_URL_LENGTH];
-		int imageprocessres = decodeImage(filename, url);
-		uint32_t servercode;
-		uint32_t urllength;
-		if(imageprocessres == 1) {
-			// Succesful decode
-			sprintf(msg, "Succesfully decoded to URL: %s", url);
+		if(filesize > MAX_IMAGE_SIZE) {
+			// Too big of a file size, return error code
+			sprintf(msg, "Filesize too big, given: %d | max: %d", filesize, MAX_IMAGE_SIZE);
 			logentry(msg, s);
-			servercode = 0;
-			urllength = MAX_URL_LENGTH;
+			// Use servercode 6 for file size too big
+			uint32_t servercode = 6;
+			if(send(sockfd, &servercode, sizeof(uint32_t), 0) == -1) {
+				perror("send servercode");
+			}
+			char filesizetoobig[100];
+			sprintf(filesizetoobig, FILESIZE_TOO_BIG, MAX_IMAGE_SIZE);
+			uint32_t filesizetoobiglen = sizeof(filesizetoobig);
+			if(send(sockfd, &filesizetoobiglen, sizeof(uint32_t), 0) == -1) {
+				perror("send filesizetoobiglen");
+			}
+			
+			if(send(sockfd, filesizetoobig, filesizetoobiglen, 0) == -1) {
+				perror("send filesizetoobig");
+			}
 		} else {
-			// Unsuccesful decode
-			logentry("Could not decode QR Code", s);
-			servercode = 1;
-			urllength = 0;
-		}
-		// Send server code
-		if(send(sockfd, &servercode, sizeof(uint32_t), 0) == -1) {
-			perror("send servercode");
-		}
-		// Send urllength
-		if(send(sockfd, &urllength, sizeof(uint32_t), 0) == -1) {
-			perror("send urllength");
-		}
-		if(urllength > 0) {
-			if(send(sockfd, &url, urllength, 0) == -1) {
-				perror("send url");
+			char* data = (char *) malloc(MAX_IMAGE_SIZE);
+			receive(sockfd, filesize, data);
+			printf("%d\n", filesize);
+			// NUM_IDENTIFIER + 4 for 'out/' + 4 for '.png'
+			char* filename = (char *) malloc(NUM_IDENTIFIER + 4 + 4);
+			save_to_temp_file(data, filesize, filename);
+			char url[MAX_URL_LENGTH];
+			int imageprocessres = decodeImage(filename, url);
+			uint32_t servercode;
+			uint32_t urllength;
+			if(imageprocessres == 1) {
+				// Succesful decode
+				sprintf(msg, "Succesfully decoded to URL: %s", url);
+				logentry(msg, s);
+				servercode = 0;
+				urllength = MAX_URL_LENGTH;
+			} else {
+				// Unsuccesful decode
+				logentry("Could not decode QR Code", s);
+				servercode = 1;
+				urllength = 0;
+			}
+			// Send server code
+			if(send(sockfd, &servercode, sizeof(uint32_t), 0) == -1) {
+				perror("send servercode");
+			}
+			// Send urllength
+			if(send(sockfd, &urllength, sizeof(uint32_t), 0) == -1) {
+				perror("send urllength");
+			}
+			if(urllength > 0) {
+				if(send(sockfd, &url, urllength, 0) == -1) {
+					perror("send url");
+				}
 			}
 		}
 }
