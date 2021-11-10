@@ -35,9 +35,12 @@ void send_file(char* filename, int sockfd) {
 		exit(1);
 	}
 
-	// Read file
-	char data[4096];
-	uint32_t filesize = fread(data, 1, 4096, fp);
+	uint32_t filesize;
+	fseek(fp, 0, SEEK_END); // seek to end of file
+	filesize = ftell(fp); // get current file pointer
+	fseek(fp, 0, SEEK_SET); // seek back to beginning of file
+	char data[filesize];
+	fread(data, 1, filesize, fp);
 	
 	printf("Read file of size: %d\n", filesize);
 	printf("Read file with data: %s\n", data);
@@ -68,7 +71,7 @@ void receive(int socket, uint32_t size, void* saveStruct) {
 		cnt++;
 		totalBytesRecv += bytesRecv;
 		saveStruct += bytesRecv;
-		printf("Received %d/%d bytes on the iteration #%d | Total received: %d\n", bytesRecv, size, cnt, totalBytesRecv);
+		//printf("Received %d/%d bytes on the iteration #%d | Total received: %d\n", bytesRecv, size, cnt, totalBytesRecv);
     }
 }
 
