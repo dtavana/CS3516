@@ -263,6 +263,8 @@ void runInteraction(int sockfd, char* s) {
 					perror("send url");
 				}
 			}
+			free(data);
+			free(filename);
 		}
 }
 

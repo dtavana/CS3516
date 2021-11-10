@@ -144,6 +144,7 @@ int main(int argc, char *argv[])
 		} else {
 			printf("Received the following error: %s\n", data);
 		}
+		free(data);
 	} else {
 		// URL could not be decoded
 		printf("URL could not be decoded for provided file\n");
