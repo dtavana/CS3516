@@ -27,8 +27,6 @@
 #define NUM_SECONDS 60
 // Default number of users to connect at a time
 #define NUM_USERS 3
-// Default timeout in seconds for a client
-#define TIMEOUT 80
 
 // SETTINGS
 // Number of characters in filename identifier
@@ -60,7 +58,6 @@ char* port = PORT;
 int numrequests = NUM_REQUESTS;
 int numseconds = NUM_SECONDS;
 int maxusers = NUM_USERS;
-int clienttimeout = TIMEOUT;
 
 void sigchld_handler(int s)
 {
@@ -128,22 +125,18 @@ void parseargs(int argc, char *argv[]) {
 			case 'm':
 				maxusers = atoi(optarg);
 				break;
-			case 't':
-				clienttimeout = atoi(optarg);
-				break;
 			case 'h':
-				printf("Usage: ./server -p PORT -r NUM_REQUESTS -s NUM_SECONDS -m MAX_USERS -t TIMEOUT\n");
+				printf("Usage: ./server -p PORT -r NUM_REQUESTS -s NUM_SECONDS -m MAX_USERS\n");
 				printf("PORT: Port to run server on\n");
 				printf("NUM_REQUESTS: Number of requests used in rate limit\n");
 				printf("NUM_SECONDS: Number of seconds used in rate limit\n");
 				printf("MAX_USERS: Max number of concurrent users\n");
-				printf("TIMEOUT: Number of seconds for client timeout\n");
 				exit(1);
 				break;
 
 		}
 	}
-	sprintf(msg, "Using the following arguments: PORT %s | NUM_REQUESTS %d | NUM_SECONDS %d | MAX_USERS %d | TIMEOUT %d", port, numrequests, numseconds, maxusers, clienttimeout);
+	sprintf(msg, "Using the following arguments: PORT %s | NUM_REQUESTS %d | NUM_SECONDS %d | MAX_USERS %d", port, numrequests, numseconds, maxusers);
 	logentry(msg, "SERVER");
 }
 
