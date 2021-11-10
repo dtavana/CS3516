@@ -1,6 +1,4 @@
-/*
-** server.c -- a stream socket server demo
-*/
+// Adapted from http://beej.us/guide/bgnet/pdf/bgnet_usl_c_1.pdf Chapter 6
 
 #include <stdio.h>
 #include <stdlib.h>
