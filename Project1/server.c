@@ -170,7 +170,7 @@ void receive(int socket, uint32_t size, void* saveStruct) {
 		cnt++;
 		totalBytesRecv += bytesRecv;
 		saveStruct += bytesRecv;
-		printf("Received %d/%d bytes on the iteration #%d | Total received: %d\n", bytesRecv, size, cnt, totalBytesRecv);
+		//printf("Received %d/%d bytes on the iteration #%d | Total received: %d\n", bytesRecv, size, cnt, totalBytesRecv);
     }
 }
 
