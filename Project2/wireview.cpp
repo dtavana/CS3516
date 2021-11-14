@@ -73,7 +73,7 @@ int timeval_subtract (struct timeval* result, struct timeval* x, struct timeval*
     return x->tv_sec < y->tv_sec;
 }
 
-void update_unique_host_map(map<string, int> unique_host_map, string key) {
+void update_unique_host_map(map<string, int>& unique_host_map, string key) {
     if(unique_host_map.count(key) > 0) {
         // Value exists, increment
         unique_host_map[key]++;
@@ -82,7 +82,7 @@ void update_unique_host_map(map<string, int> unique_host_map, string key) {
     }
 }
 
-void print_unique_host_map(map<string, int> unique_host_map) {
+void print_unique_host_map(map<string, int>& unique_host_map) {
     if(unique_host_map.size() == 0) {
         cout << "No entries" << endl;
     } else {
