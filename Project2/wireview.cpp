@@ -1,9 +1,14 @@
 #include <iostream>
+#include <string>
 #include <pcap/pcap.h>
 #include <vector>
 #include <map>
 #include <set>
 #include <net/ethernet.h>
+#include <netinet/ip.h>
+#include <netinet/udp.h>
+#include <netinet/if_ether.h>
+#include <arpa/inet.h>
 
 using namespace std;
 
@@ -25,11 +30,11 @@ struct timeval end_capture_time;
 
 string seperator = "--------------------------------";
 
-string address_to_string(uint8_t* ptr) {
+string ethernet_address_to_string(uint8_t* ptr) {
     // Leave space for ':'
     char address_buf[ETH_ALEN * 3];
     sprintf(address_buf, 
-            "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x", 
+            "%02x:%02x:%02x:%02x:%02x:%02x", 
             ptr[0], 
             ptr[1], 
             ptr[2],
@@ -37,6 +42,13 @@ string address_to_string(uint8_t* ptr) {
             ptr[4],
             ptr[5]);
     string res(address_buf);
+    return res;
+}
+
+string ipv4_adress_to_string(uint32_t* addr) {
+    char buffer[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, addr, buffer, INET_ADDRSTRLEN);
+    string res (buffer);
     return res;
 }
 
@@ -82,6 +94,13 @@ void update_unique_host_map(map<string, int>& unique_host_map, string key) {
     }
 }
 
+void update_arp_machines_map(string key, string value) {
+    if(arp_machines.count(key) == 0) {
+        // Value exists, increment
+        arp_machines.insert(make_pair(key, value));
+    }
+}
+
 void print_unique_host_map(map<string, int>& unique_host_map) {
     if(unique_host_map.size() == 0) {
         cout << "No entries" << endl;
@@ -108,7 +127,7 @@ void print_port_set(set<int> port_set) {
         cout << "No entries" << endl;
     } else {
         for (auto const el : port_set) {
-            cout << el << ", " << endl;
+            cout << el << endl;
         }
     }
 }
@@ -168,6 +187,10 @@ void pcap_callback(u_char* _, const struct pcap_pkthdr* header, const u_char* da
         min_packet_length = header->len;
     }
 
+    // Increment seen_packets and save latest packet timestamp as final capture time
+    seen_packets++;
+    end_capture_time = header->ts;
+
     if(header->len > max_packet_length) {
         max_packet_length = header->len;
     } else if (header->len < min_packet_length) {
@@ -175,15 +198,40 @@ void pcap_callback(u_char* _, const struct pcap_pkthdr* header, const u_char* da
     }
     packet_length_sum += header->len;
 
+    // Ethernet header
     ether_header* ethernet_header = (ether_header*) data;
-    string source_host = address_to_string(ethernet_header->ether_shost);
-    string dest_host = address_to_string(ethernet_header->ether_dhost);
+    string source_host = ethernet_address_to_string(ethernet_header->ether_shost);
+    string dest_host = ethernet_address_to_string(ethernet_header->ether_dhost);
     update_unique_host_map(unique_senders_macs, source_host);
     update_unique_host_map(unique_recipients_macs, dest_host);
 
-    // Increment seen_packets and save latest packet timestamp as final capture time
-    seen_packets++;
-    end_capture_time = header->ts;
+    // Skip over IPV6 Packets
+    if(ntohs(ethernet_header->ether_type) == ETHERTYPE_IPV6) {
+        return;
+    }
+
+    if(ntohs(ethernet_header->ether_type) == ETHERTYPE_IP) {
+        // IP Packet
+        iphdr* ip_header = (iphdr*) (data + sizeof(ether_header));
+        string source_ip = ipv4_adress_to_string(&ip_header->saddr);
+        string dest_ip = ipv4_adress_to_string(&ip_header->daddr);
+        update_unique_host_map(unique_senders_ips, source_ip);
+        update_unique_host_map(unique_recipients_ips, dest_ip);
+        if(ip_header->protocol == IPPROTO_UDP) {
+            udphdr* udp_header = (udphdr*) (data + sizeof(ether_header) + sizeof(iphdr));
+            udp_source_ports.insert(ntohs(udp_header->uh_sport));
+            udp_dest_ports.insert(ntohs(udp_header->uh_dport));
+        }
+    } else if (ntohs(ethernet_header->ether_type) == ETHERTYPE_ARP) {
+        // ARP Packet
+        ether_arp* arp_header = (ether_arp*) (data + sizeof(ether_header));
+        string source_host = ethernet_address_to_string(arp_header->arp_sha);
+        string source_ip = ipv4_adress_to_string((uint32_t*) arp_header->arp_spa);
+        if(ntohs(arp_header->ea_hdr.ar_op) == ARPOP_REPLY) {
+            // Machine replying means that it participates in ARP
+            update_arp_machines_map(source_host, source_ip);
+        }
+    }
 }
 
 int main(int argc, char* argv[]) {
