@@ -96,7 +96,6 @@ void update_unique_host_map(map<string, int>& unique_host_map, string key) {
 
 void update_arp_machines_map(string key, string value) {
     if(arp_machines.count(key) == 0) {
-        // Value exists, increment
         arp_machines.insert(make_pair(key, value));
     }
 }
