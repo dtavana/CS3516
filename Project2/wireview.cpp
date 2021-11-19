@@ -218,7 +218,7 @@ void pcap_callback(u_char* _, const struct pcap_pkthdr* header, const u_char* da
         update_unique_host_map(unique_senders_ips, source_ip);
         update_unique_host_map(unique_recipients_ips, dest_ip);
         if(ip_header->protocol == IPPROTO_UDP) {
-            udphdr* udp_header = (udphdr*) (data + sizeof(ether_header) + sizeof(iphdr));
+            udphdr* udp_header = (udphdr*) (data + sizeof(ether_header) + (ip_header->ihl * 4));
             udp_source_ports.insert(ntohs(udp_header->uh_sport));
             udp_dest_ports.insert(ntohs(udp_header->uh_dport));
         }
@@ -227,10 +227,7 @@ void pcap_callback(u_char* _, const struct pcap_pkthdr* header, const u_char* da
         ether_arp* arp_header = (ether_arp*) (data + sizeof(ether_header));
         string source_host = ethernet_address_to_string(arp_header->arp_sha);
         string source_ip = ipv4_adress_to_string((uint32_t*) arp_header->arp_spa);
-        if(ntohs(arp_header->ea_hdr.ar_op) == ARPOP_REPLY) {
-            // Machine replying means that it participates in ARP
-            update_arp_machines_map(source_host, source_ip);
-        }
+        update_arp_machines_map(source_host, source_ip);
     }
 }
 
