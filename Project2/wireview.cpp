@@ -230,11 +230,11 @@ void pcap_callback(u_char* _, const struct pcap_pkthdr* header, const u_char* da
         ether_arp* arp_header = (ether_arp*) (data + sizeof(ether_header));
         string source_host = ethernet_address_to_string(arp_header->arp_sha);
         string source_ip = ipv4_adress_to_string((uint32_t*) arp_header->arp_spa);
-        string dest_host = ethernet_address_to_string(arp_header->arp_tha);
-        string dest_ip = ipv4_adress_to_string((uint32_t*) arp_header->arp_tpa);
         update_arp_machines_map(source_host, source_ip);
         if(ntohs(arp_header->ea_hdr.ar_op) == ARPOP_REPLY) {
             // Only add destination information on replys
+            string dest_host = ethernet_address_to_string(arp_header->arp_tha);
+            string dest_ip = ipv4_adress_to_string((uint32_t*) arp_header->arp_tpa);
             update_arp_machines_map(dest_host, dest_ip);
         }
     }
