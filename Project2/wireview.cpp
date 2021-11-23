@@ -85,19 +85,23 @@ int timeval_subtract (struct timeval* result, struct timeval* x, struct timeval*
     return x->tv_sec < y->tv_sec;
 }
 
-void update_unique_host_map(map<string, int>& unique_host_map, string key) {
+int update_unique_host_map(map<string, int>& unique_host_map, string key) {
     if(unique_host_map.count(key) > 0) {
         // Value exists, increment
         unique_host_map[key]++;
+        return 1;
     } else {
         unique_host_map.insert(make_pair(key, 1));
+        return 0;
     }
 }
 
-void update_arp_machines_map(string key, string value) {
+int update_arp_machines_map(string key, string value) {
     if(arp_machines.count(key) == 0) {
         arp_machines.insert(make_pair(key, value));
+        return 0;
     }
+    return 1;
 }
 
 void print_unique_host_map(map<string, int>& unique_host_map) {
@@ -226,7 +230,13 @@ void pcap_callback(u_char* _, const struct pcap_pkthdr* header, const u_char* da
         ether_arp* arp_header = (ether_arp*) (data + sizeof(ether_header));
         string source_host = ethernet_address_to_string(arp_header->arp_sha);
         string source_ip = ipv4_adress_to_string((uint32_t*) arp_header->arp_spa);
+        string dest_host = ethernet_address_to_string(arp_header->arp_tha);
+        string dest_ip = ipv4_adress_to_string((uint32_t*) arp_header->arp_tpa);
         update_arp_machines_map(source_host, source_ip);
+        if(ntohs(arp_header->ea_hdr.ar_op) == ARPOP_REPLY) {
+            // Only add destination information on replys
+            update_arp_machines_map(dest_host, dest_ip);
+        }
     }
 }
 
