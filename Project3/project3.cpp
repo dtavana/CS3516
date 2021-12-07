@@ -59,6 +59,18 @@ void printOverlayHeader(char* buffer) {
     cout << payload << endl;
 }
 
+// Return 1 if packet should be dropped, 0 otherwise
+int updateOverlayHeaders(char* buffer) {
+    struct iphdr* ipHeader = (struct iphdr*) buffer;
+    struct udphdr* udpHeader = (struct udphdr*) (buffer + IP_HEADER_SIZE);
+    ipHeader->ttl--;
+    if(ipHeader->ttl <= 0) {
+        return 1;
+    }
+    return 0;
+
+}
+
 void sendData(int sock, char* payload, string destAddr) {
     int bufferSize = getBufferSize(payload);
     char buffer[bufferSize];
@@ -68,10 +80,16 @@ void sendData(int sock, char* payload, string destAddr) {
     currentId++;
 }
 
-void recvData(int sock){
+void recvDataHost(int sock){
     char buffer[MAX_RECEIVE_BUFFER_SIZE];
     int recv = cs3516_recv(sock, buffer, MAX_RECEIVE_BUFFER_SIZE);
-    cout << recv << endl;
+    updateOverlayHeaders(buffer);
+    printOverlayHeader(buffer);
+}
+
+void recvDataRouter(int sock){
+    char buffer[MAX_RECEIVE_BUFFER_SIZE];
+    int recv = cs3516_recv(sock, buffer, MAX_RECEIVE_BUFFER_SIZE);
     printOverlayHeader(buffer);
 }
 
@@ -88,6 +106,10 @@ int isRouter(char* argv[]) {
 
 void runRouter() {
     cout << "I am a router" << endl;
+    int sock = create_cs3516_socket();
+    while(1) {
+        recvDataRouter(sock);
+    }
 }
 
 void runHost() {
@@ -117,6 +139,7 @@ int main(int argc, char* argv[]) {
             runHost();
         } else {
             cerr << "Did not pass in 'r' or 'h'" << endl;
+            exit(1);
         }
     } else {
         // NO PARAMETERS
