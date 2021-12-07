@@ -8,7 +8,9 @@ using namespace std;
 #define IP_HEADER_SIZE 20
 #define UDP_HEADER_SIZE 8
 
-#define MAX_RECEIVE_BUFFER_SIZE 3000
+#define MAX_RECEIVE_BUFFER_SIZE 1000
+
+int currentId = 0;
 
 unsigned long stringIpToByte(string ip) {
     struct sockaddr_in to;
@@ -32,8 +34,20 @@ void createOverlayHeaders(char* buffer, char* data, string destAddress) {
     struct udphdr* udpHeader = (struct udphdr*) (buffer + IP_HEADER_SIZE);
     char* payload = (buffer + IP_HEADER_SIZE + UDP_HEADER_SIZE);
     strncpy(payload, data, strlen(data));
+    //ipHeader->saddr = ?;
     ipHeader->daddr = stringIpToByte(destAddress);
+    ipHeader->tos = 0;
+    ipHeader->frag_off = 0;
+    ipHeader->check = 0;
+    //ipHeader->tot_len = ?;
+    ipHeader->ihl = 5;
+    ipHeader->protocol = IPPROTO_UDP; // 17
+    //ipHeader->ttl = ?;
+    ipHeader->id = currentId;
+
+    udpHeader->uh_sport = MYPORT;
     udpHeader->uh_dport = MYPORT;
+    //udpHeader->uh_ulen = ?;
 }
 
 void printOverlayHeader(char* buffer) {
@@ -51,6 +65,7 @@ void sendData(int sock, char* payload, string destAddr) {
     createOverlayHeaders(buffer, payload, "127.0.0.1");
     printOverlayHeader(buffer);
     cs3516_send(sock, buffer, bufferSize, stringIpToByte("127.0.0.1"));
+    currentId++;
 }
 
 void recvData(int sock){
@@ -60,8 +75,27 @@ void recvData(int sock){
     printOverlayHeader(buffer);
 }
 
-int main(int argc, char* argv[]) {
-    if(argc > 1) {
+// Return 1 for router, 0 for host, -1 for invalid
+int isRouter(char* argv[]) {
+    if(strcmp(argv[1], "r") == 0){
+        return 1;
+    }
+    if(strcmp(argv[1], "h") == 0){
+        return 0;
+    }
+    return -1;
+}
+
+void runRouter() {
+    cout << "I am a router" << endl;
+}
+
+void runHost() {
+    cout << "I am a host" << endl;
+}
+
+/*
+if(argc > 1) {
         cout << "SERVER" << endl;
         int sock = create_cs3516_socket();
         recvData(sock);
@@ -71,5 +105,22 @@ int main(int argc, char* argv[]) {
         int sock = socket(AF_INET, SOCK_DGRAM, 0);
         sendData(sock, payload, "127.0.0.1");
         close(sock);
+    }
+    */
+
+int main(int argc, char* argv[]) {
+    if(argc > 1) {
+        int isRouterRes = isRouter(argv);
+        if(isRouterRes == 1) {
+            runRouter();
+        } else if(isRouterRes == 0) {
+            runHost();
+        } else {
+            cerr << "Did not pass in 'r' or 'h'" << endl;
+        }
+    } else {
+        // NO PARAMETERS
+        cerr << "Usage ./project3 [r/h]" << endl;
+        exit(1);
     }
 }
