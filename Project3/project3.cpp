@@ -55,6 +55,7 @@ int sock;
 int currentId = 0;
 int queueLength;
 int defaultTtlValue;
+size_t readFileSize = 0;
 NodeData* myConfig;
 NodeData* outRouter;
 
@@ -179,29 +180,25 @@ void addRouterLogEntry(string sourceIp, string destIp, int identifier, status st
     fclose(fp);
 }
  
-int getBufferSize(char* payload) {
-    return IP_HEADER_SIZE + UDP_HEADER_SIZE + strlen(payload);
-}
- 
-void createOverlayHeaders(char* buffer, char* data, string destAddress) {
+void createOverlayHeaders(char* buffer, char* data, string destAddress, int sourcePort, int destPort) {
     struct iphdr* ipHeader = (struct iphdr*) buffer;
     struct udphdr* udpHeader = (struct udphdr*) (buffer + IP_HEADER_SIZE);
     char* payload = (buffer + IP_HEADER_SIZE + UDP_HEADER_SIZE);
-    strncpy(payload, data, strlen(data));
+    memcpy(payload, data, readFileSize);
     ipHeader->saddr = myConfig->overlayIp;
     ipHeader->daddr = stringIpToByte(destAddress);
     ipHeader->tos = 0;
     ipHeader->frag_off = 0;
     ipHeader->check = 0;
-    //ipHeader->tot_len = ?;
+    ipHeader->tot_len = IP_HEADER_SIZE + UDP_HEADER_SIZE + readFileSize;
     ipHeader->ihl = 5;
     ipHeader->protocol = IPPROTO_UDP; // 17
     ipHeader->ttl = defaultTtlValue;
     ipHeader->id = currentId;
  
-    udpHeader->uh_sport = MYPORT;
-    udpHeader->uh_dport = MYPORT;
-    //udpHeader->uh_ulen = ?;
+    udpHeader->uh_sport = sourcePort;
+    udpHeader->uh_dport = destPort;
+    udpHeader->uh_ulen = IP_HEADER_SIZE + UDP_HEADER_SIZE + readFileSize;
 }
  
 void printOverlayHeader(char* buffer) {
@@ -225,13 +222,29 @@ int updateOverlayHeaders(char* buffer) {
  
 }
  
-void sendInitialData(char* payload, uint32_t payloadSize, string destAddr) {
-    int bufferSize = getBufferSize(payload);
-    char buffer[bufferSize];
-    createOverlayHeaders(buffer, payload, destAddr);
-    cs3516_send(sock, &payloadSize, sizeof(uint32_t), outRouter->realNetworkIp);
-    cs3516_send(sock, buffer, bufferSize, outRouter->realNetworkIp);
-    currentId++;
+void sendInitialData() {
+    if (access("send_config.txt", F_OK) == 0) {
+        ifstream fpstream("send_config.txt");
+        string line;
+        getline(fpstream, line);
+        string destAddr = strtok((char*) line.c_str(), " ");
+        int sourcePort = atoi(strtok(NULL, " "));
+        int destPort = atoi(strtok(NULL, " "));
+        fpstream.close();
+        FILE* fp;
+        fp = fopen("send_body", "rb");
+        fseek(fp, 0, SEEK_END); // seek to end of file
+        readFileSize = ftell(fp); // get current file pointer
+        fseek(fp, 0, SEEK_SET); // seek back to beginning of file
+        char data[readFileSize];
+        fread(data, 1, readFileSize, fp);
+        int bufferSize = IP_HEADER_SIZE + UDP_HEADER_SIZE + readFileSize;
+        char buffer[bufferSize];
+        cs3516_send(sock, &readFileSize, sizeof(uint32_t), outRouter->realNetworkIp);
+        createOverlayHeaders(buffer, data, destAddr, sourcePort, destPort);
+        cs3516_send(sock, buffer, bufferSize, outRouter->realNetworkIp);
+        cout << "Transmitted data for a file with size of " << readFileSize << " bytes" << endl;
+    } 
 }
 
 int getDelay(char* buffer) {
@@ -250,6 +263,7 @@ void sendData() {
             int delay = getDelay(buffer);
             if(queueEl->timestamp + delay < currentTimestamp) {
                 char* buffer = *queueEl->buffer;
+                char* payload = (buffer + IP_HEADER_SIZE + UDP_HEADER_SIZE);
                 cs3516_send(sock, &queueEl->fileSize, sizeof(uint32_t), stringIpToByte(queueEl->destAddress));
                 cs3516_send(sock, buffer, IP_HEADER_SIZE + UDP_HEADER_SIZE + queueEl->fileSize, stringIpToByte(queueEl->destAddress));
             } else {
@@ -309,15 +323,35 @@ void enqueueData(char** buffer, uint32_t fileSize) {
     outputQueues[byteIp].swap(queue);
     addRouterLogEntry(byteIpToString(&ipHeader->saddr), byteIpToString(&ipHeader->daddr), ipHeader->id, SENT_OKAY, byteIpToString(&ipHeader->daddr));
 }
+
+void writeData(char* buffer) {
+    struct iphdr* ipHeader = (struct iphdr*) buffer;
+    struct udphdr* udpHeader = (struct udphdr*) (buffer + IP_HEADER_SIZE);
+    char* payload = (buffer + IP_HEADER_SIZE + UDP_HEADER_SIZE);
+    char logEntry[MAX_LOG_ENTRY_SIZE];
+    sprintf(logEntry, 
+            "Source Overlay IP: %s Dest Overlay IP: %s Source Port: %d Dest Port: %d\n", 
+            byteIpToString(&ipHeader->saddr).c_str(), 
+            byteIpToString(&ipHeader->daddr).c_str(),
+            udpHeader->uh_sport,
+            udpHeader->uh_sport);
+    FILE* fp;
+    fp = fopen("received_stats.txt", "a");
+    fputs(logEntry, fp);
+    fclose(fp);
+    fp = fopen("received", "ab");
+    fputs(payload, fp);
+    fclose(fp);
+}
  
 void recvDataHost() {
     uint32_t fileSize;
     cs3516_recv(sock, &fileSize, sizeof(uint32_t));
     char buffer[IP_HEADER_SIZE + UDP_HEADER_SIZE + fileSize];
     cs3516_recv(sock, buffer, IP_HEADER_SIZE + UDP_HEADER_SIZE + fileSize);
-    cout << "Received Data" << endl;
-    buffer[IP_HEADER_SIZE + UDP_HEADER_SIZE + fileSize - 1] = '\0';
-    printOverlayHeader(buffer);
+    char* payload = (buffer + IP_HEADER_SIZE + UDP_HEADER_SIZE);
+    cout << "Received a file with a size of " << fileSize << " bytes" << endl;
+    writeData(buffer);
 }
  
 void recvDataRouter(){
@@ -466,15 +500,9 @@ void runRouter() {
 }
  
 void runHost() {
-    if(myConfig->overlayIp == stringIpToByte("1.2.3.1")) {
-        cout << "I am a sending host" << endl;
-        sock = create_cs3516_socket(myConfig->realNetworkIp);
-        char payload[12] = {"hello world"};
-        sendInitialData(payload, 12, "4.5.6.1");
-    } else {
-        cout << "I am a host" << endl;
-        sock = create_cs3516_socket(myConfig->realNetworkIp);
-    }
+    cout << "I am a host" << endl;
+    sock = create_cs3516_socket(myConfig->realNetworkIp);
+    sendInitialData();
     while(1) {
         recvNonBlocking(0);
     }

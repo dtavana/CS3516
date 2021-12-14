@@ -4,6 +4,9 @@
         "iostream": "cpp",
         "ostream": "cpp",
         "bitset": "cpp",
-        "map": "cpp"
+        "map": "cpp",
+        "iosfwd": "cpp",
+        "fstream": "cpp",
+        "*.tcc": "cpp"
     }
 }
