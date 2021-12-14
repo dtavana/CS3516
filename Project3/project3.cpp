@@ -15,7 +15,7 @@ using namespace std;
 #define MAX_RECEIVE_BUFFER_SIZE 1000
 #define MAX_LOG_ENTRY_SIZE 500
 #define MAX_QUEUE_LENGTH 2
-#define ROUTER_DELAY 5000
+#define ROUTER_DELAY 2000
  
 enum status {
     TTL_EXPIRED,
@@ -36,6 +36,7 @@ int currentId = 0;
 struct QueueNode
 {
     char** buffer;
+    uint32_t fileSize;
     time_t timestamp;
     string destAddress;
 };
@@ -120,10 +121,11 @@ int updateOverlayHeaders(char* buffer) {
  
 }
  
-void sendInitialData(char* payload, string destAddr) {
+void sendInitialData(char* payload, uint32_t payloadSize, string destAddr) {
     int bufferSize = getBufferSize(payload);
     char buffer[bufferSize];
     createOverlayHeaders(buffer, payload, destAddr);
+    cs3516_send(sock, &payloadSize, sizeof(uint32_t), stringIpToByte("10.0.2.16"));
     cs3516_send(sock, buffer, bufferSize, stringIpToByte("10.0.2.16"));
     currentId++;
 }
@@ -136,9 +138,8 @@ void sendData() {
             time_t currentTimestamp = time(NULL) * 1000;
             if(queueEl->timestamp + ROUTER_DELAY < currentTimestamp) {
                 char* buffer = *queueEl->buffer;
-                char* payload = (buffer + IP_HEADER_SIZE + UDP_HEADER_SIZE);
-                int bufferSize = getBufferSize(payload);
-                cs3516_send(sock, buffer, bufferSize, stringIpToByte(queueEl->destAddress));
+                cs3516_send(sock, &queueEl->fileSize, sizeof(uint32_t), stringIpToByte(queueEl->destAddress));
+                cs3516_send(sock, buffer, IP_HEADER_SIZE + UDP_HEADER_SIZE + queueEl->fileSize, stringIpToByte(queueEl->destAddress));
             } else {
                 newQueue.push_back(queueEl);
             }
@@ -147,7 +148,7 @@ void sendData() {
     }
 }
  
-void enqueueData(char** buffer) {
+void enqueueData(char** buffer, uint32_t fileSize) {
     struct iphdr* ipHeader = (struct iphdr*) *buffer;
     string ipAddress = byteIpToString(&ipHeader->daddr);
     map<string, vector<QueueNode*>>::iterator it = outputQueues.find(ipAddress);
@@ -163,6 +164,7 @@ void enqueueData(char** buffer) {
     }
     QueueNode* node = (QueueNode*) malloc(sizeof(QueueNode));
     node->buffer = buffer;
+    node->fileSize = fileSize;
     node->timestamp = time(NULL) * 1000;
     node->destAddress = ipAddress;
     queue.push_back(node);
@@ -171,19 +173,24 @@ void enqueueData(char** buffer) {
 }
  
 void recvDataHost() {
-    char buffer[MAX_RECEIVE_BUFFER_SIZE];
-    int recv = cs3516_recv(sock, buffer, MAX_RECEIVE_BUFFER_SIZE);
+    uint32_t fileSize;
+    cs3516_recv(sock, &fileSize, sizeof(uint32_t));
+    char buffer[IP_HEADER_SIZE + UDP_HEADER_SIZE + fileSize];
+    cs3516_recv(sock, buffer, IP_HEADER_SIZE + UDP_HEADER_SIZE + fileSize);
     cout << "Received Data" << endl;
+    buffer[IP_HEADER_SIZE + UDP_HEADER_SIZE + fileSize - 1] = '\0';
     printOverlayHeader(buffer);
 }
  
 void recvDataRouter(){
-    char* buffer = (char*) malloc(MAX_RECEIVE_BUFFER_SIZE);
-    int recv = cs3516_recv(sock, buffer, MAX_RECEIVE_BUFFER_SIZE);
+    uint32_t fileSize;
+    cs3516_recv(sock, &fileSize, sizeof(uint32_t));
+    char* buffer = (char*) malloc(IP_HEADER_SIZE + UDP_HEADER_SIZE + fileSize);
+    cs3516_recv(sock, buffer, IP_HEADER_SIZE + UDP_HEADER_SIZE + fileSize);
     int ttlRes = updateOverlayHeaders(buffer);
     if(ttlRes != 1) {
         // If ttlRes is 1, drop packet
-        enqueueData(&buffer);
+        enqueueData(&buffer, fileSize);
     }
  
 }
@@ -228,7 +235,7 @@ void runHost(int isSendingHost) {
         cout << "I am a sending host" << endl;
         sock = create_cs3516_socket(stringIpToByte("10.0.2.15"));
         char payload[12] = {"hello world"};
-        sendInitialData(payload, "10.0.2.17");
+        sendInitialData(payload, 12, "10.0.2.17");
     } else {
         cout << "I am a host" << endl;
         sock = create_cs3516_socket(stringIpToByte("10.0.2.17"));
