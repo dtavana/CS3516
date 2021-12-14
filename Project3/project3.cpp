@@ -7,6 +7,7 @@ using namespace std;
 #include <queue>
 #include <map>
 #include <vector>
+#include <bitset>
  
 #define ETHERNET_HEADER_SIZE 14
 #define IP_HEADER_SIZE 20
@@ -29,10 +30,7 @@ string status_label[] = {
     "NO_ROUTE_TO_HOST",
     "SENT_OKAY"
 };
- 
-int sock;
-int currentId = 0;
- 
+
 struct QueueNode
 {
     char** buffer;
@@ -40,8 +38,126 @@ struct QueueNode
     time_t timestamp;
     string destAddress;
 };
+struct TrieNode {
+    uint32_t nextHopIP;
+    bool isSet;
+    struct TrieNode* zeroChild;
+    struct TrieNode* oneChild;
+};
  
+int sock;
+int currentId = 0;
 map<string, vector<QueueNode*>> outputQueues;
+TrieNode* root;
+
+unsigned long stringIpToByte(string ip) {
+    struct sockaddr_in to;
+    inet_aton(ip.c_str(), &to.sin_addr);
+    return to.sin_addr.s_addr;
+}
+ 
+string byteIpToString(uint32_t* addr) {
+    char buffer[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, addr, buffer, INET_ADDRSTRLEN);
+    string res (buffer);
+    return res;
+}
+
+void addNodeToTrie(string prefix, string nextHop) {
+    string ip = strtok((char*) prefix.c_str(), "/");
+    int prefixLength = atoi(strtok(NULL, "/"));
+    int firstSegment = atoi(strtok((char*) ip.c_str(), "."));
+    int secondSegment = atoi(strtok(NULL, "."));
+    int thirdSegment = atoi(strtok(NULL, "."));
+    int fourthSegment = atoi(strtok(NULL, "."));
+    bitset<8> binFirstSegment(firstSegment);
+    bitset<8> binSecondSegment(secondSegment);
+    bitset<8> binThirdSegment(thirdSegment);
+    bitset<8> binFourthSegment(fourthSegment);
+    bitset<32> totalBin(binFourthSegment.to_string() + binThirdSegment.to_string() + binSecondSegment.to_string() + binFirstSegment.to_string());
+    cout << totalBin.to_string() << endl;
+    TrieNode* currentNode = root;
+    for(int i = 0; i < min(prefixLength, 32); ++i) {
+        int currentBit = totalBin[i];
+        if(currentBit == 0) {
+            if(currentNode->zeroChild == NULL) {
+                currentNode->zeroChild = (TrieNode*) malloc(sizeof(TrieNode));
+                currentNode->zeroChild->isSet = 0;
+                currentNode->zeroChild->nextHopIP = 0;
+                currentNode->zeroChild->zeroChild = NULL;
+                currentNode->zeroChild->oneChild = NULL;
+                currentNode = currentNode->zeroChild;
+                cout << "Adding zero child" << endl;
+                continue; 
+            } else {
+                currentNode = currentNode->zeroChild;
+                continue; 
+            }
+        } else {
+            if(currentNode->oneChild == NULL) {
+                currentNode->oneChild = (TrieNode*) malloc(sizeof(TrieNode));
+                currentNode->oneChild->isSet = 0;
+                currentNode->oneChild->nextHopIP = 0;
+                currentNode->oneChild->zeroChild = NULL;
+                currentNode->oneChild->oneChild = NULL;
+                currentNode = currentNode->oneChild;
+                cout << "Adding one child" << endl;
+                continue; 
+            } else {
+                currentNode = currentNode->oneChild;
+                continue; 
+            }
+        }
+    }
+    currentNode->isSet = 1;
+    currentNode->nextHopIP = stringIpToByte(nextHop);
+}
+
+uint32_t searchForNodeInTrie(string ip) {
+    cout << "Searching for " << ip << endl;
+    int firstSegment = atoi(strtok((char*) ip.c_str(), "."));
+    int secondSegment = atoi(strtok(NULL, "."));
+    int thirdSegment = atoi(strtok(NULL, "."));
+    int fourthSegment = atoi(strtok(NULL, "."));
+    bitset<8> binFirstSegment(firstSegment);
+    bitset<8> binSecondSegment(secondSegment);
+    bitset<8> binThirdSegment(thirdSegment);
+    bitset<8> binFourthSegment(fourthSegment);
+    bitset<32> totalBin(binFourthSegment.to_string() + binThirdSegment.to_string() + binSecondSegment.to_string() + binFirstSegment.to_string());
+    cout << totalBin.to_string() << endl;
+    
+    TrieNode* currentNode = root;
+    uint32_t lastIpSeen;
+    for(int i = 0; i < 32; ++i) {
+        int currentBit = totalBin[i];
+        cout << i << endl;
+        cout << currentBit << endl;
+        if(currentNode->isSet) {
+            lastIpSeen = currentNode->nextHopIP;
+            cout << "Setting lastIpSeen to " << byteIpToString(&lastIpSeen) << endl;
+        }
+        if(currentBit == 0) {
+            if(currentNode->zeroChild == NULL) {
+                cout << "hello1" << endl;
+                return lastIpSeen;
+            } else {
+                cout << 0 << endl;
+                currentNode = currentNode->zeroChild;
+                continue; 
+            }
+        } else {
+            if(currentNode->oneChild == NULL) {
+                cout << "hello2" << endl;
+                return lastIpSeen;
+            } else {
+                cout << 1 << endl;
+                currentNode = currentNode->oneChild;
+                continue; 
+            }
+        }
+    }
+    return 0;
+}
  
 void addRouterLogEntry(string sourceIp, string destIp, int identifier, status statusCode, string nextHop = "") {
     char logEntry[MAX_LOG_ENTRY_SIZE];
@@ -58,19 +174,6 @@ void addRouterLogEntry(string sourceIp, string destIp, int identifier, status st
     fp = fopen("ROUTER_control.txt", "a");
     fputs(logEntry, fp);
     fclose(fp);
-}
- 
-unsigned long stringIpToByte(string ip) {
-    struct sockaddr_in to;
-    inet_aton(ip.c_str(), &to.sin_addr);
-    return to.sin_addr.s_addr;
-}
- 
-string byteIpToString(uint32_t* addr) {
-    char buffer[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, addr, buffer, INET_ADDRSTRLEN);
-    string res (buffer);
-    return res;
 }
  
 int getBufferSize(char* payload) {
@@ -150,8 +253,9 @@ void sendData() {
  
 void enqueueData(char** buffer, uint32_t fileSize) {
     struct iphdr* ipHeader = (struct iphdr*) *buffer;
-    string ipAddress = byteIpToString(&ipHeader->daddr);
-    map<string, vector<QueueNode*>>::iterator it = outputQueues.find(ipAddress);
+    uint32_t byteIp = searchForNodeInTrie(byteIpToString(&ipHeader->daddr));
+    string stringIp = byteIpToString(&byteIp);
+    map<string, vector<QueueNode*>>::iterator it = outputQueues.find(stringIp);
     if(it == outputQueues.end()) {
         addRouterLogEntry(byteIpToString(&ipHeader->saddr), byteIpToString(&ipHeader->daddr), ipHeader->id, NO_ROUTE_TO_HOST);
         return;
@@ -166,9 +270,9 @@ void enqueueData(char** buffer, uint32_t fileSize) {
     node->buffer = buffer;
     node->fileSize = fileSize;
     node->timestamp = time(NULL) * 1000;
-    node->destAddress = ipAddress;
+    node->destAddress = stringIp;
     queue.push_back(node);
-    outputQueues[ipAddress].swap(queue);
+    outputQueues[stringIp].swap(queue);
     addRouterLogEntry(byteIpToString(&ipHeader->saddr), byteIpToString(&ipHeader->daddr), ipHeader->id, SENT_OKAY, byteIpToString(&ipHeader->daddr));
 }
  
@@ -225,6 +329,12 @@ void runRouter() {
     sock = create_cs3516_socket(stringIpToByte("10.0.2.16"));
     vector<QueueNode*> v;
     outputQueues.insert(make_pair("10.0.2.17", v));
+    root = (TrieNode*) malloc(sizeof(TrieNode));
+    root->isSet = 0;
+    root->nextHopIP = 0;
+    root->zeroChild = NULL;
+    root->oneChild = NULL;
+    addNodeToTrie("1.2.3.0/16", "10.0.2.17");
     while(1) {
         recvNonBlocking(1);
     }
@@ -235,7 +345,7 @@ void runHost(int isSendingHost) {
         cout << "I am a sending host" << endl;
         sock = create_cs3516_socket(stringIpToByte("10.0.2.15"));
         char payload[12] = {"hello world"};
-        sendInitialData(payload, 12, "10.0.2.17");
+        sendInitialData(payload, 12, "1.2.3.1");
     } else {
         cout << "I am a host" << endl;
         sock = create_cs3516_socket(stringIpToByte("10.0.2.17"));
